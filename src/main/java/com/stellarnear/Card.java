@@ -13,10 +13,13 @@ public class Card {
     private String commanderLegality;
     private String oracleText;
     private Double priceUsd;
+    private String typeBoard;
+    private String deckName;
+
 
 
     // Constructor
-    public Card(String name,String rarity, String mana_cost, int cmc, String type_line, List<String> color_identity, String commanderLegality, String oracle_text, Double price_usd) {
+    public Card(String name,String rarity, String mana_cost, int cmc, String type_line, List<String> color_identity, String commanderLegality, String oracle_text, Double price_usd, String typeBoard, String deckName) {
         this.name=name;
         this.rarity = rarity;
         this.mana_cost = mana_cost;
@@ -26,6 +29,8 @@ public class Card {
         this.commanderLegality=commanderLegality;
         this.oracleText = oracle_text;
         this.priceUsd=price_usd;
+        this.typeBoard= typeBoard;
+        this.deckName=deckName;
     }
 
     public String getName() {
@@ -81,6 +86,14 @@ public class Card {
         return oracleText;
     }
 
+
+    public String getTypeBoard() {
+        return typeBoard;
+    }
+
+    public String getDeckName() {
+        return deckName;
+    }
 
     public Double getPriceUsd() {
         return priceUsd;

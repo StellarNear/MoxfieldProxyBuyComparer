@@ -12,6 +12,7 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.text.Normalizer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -32,6 +33,11 @@ public final class MoxfieldProxyBuyComparer {
     private MoxfieldProxyBuyComparer() {
     }
 
+
+    private static String user = "StellarNear";
+    private static String notBuyedDeck = "TBDzmy5Wj0K21AevzAd5Bw";
+    private static boolean allowConsiderBoard=false;
+
     /**
      * Says hello to the world.
      * 
@@ -41,12 +47,11 @@ public final class MoxfieldProxyBuyComparer {
     public static void main(String[] args) throws IOException {
         long startTotal = System.currentTimeMillis();
 
-        String user = "StellarNear";
-        String notBuyedDeck = "TBDzmy5Wj0K21AevzAd5Bw";
+  
 
         List<UserDataDeck> allDecksForUser = getAllDeckForUser(user);
 
-        Set<Card> allCollectedCard = new HashSet<>();
+        List<Card> allCollectedCard = new ArrayList<>();
         UserDataDeck treatDeck = null;
         log.info("Found " + allDecksForUser.size() + " decks");
         for (UserDataDeck deck : allDecksForUser) {
@@ -60,42 +65,75 @@ public final class MoxfieldProxyBuyComparer {
             allCollectedCard.addAll(cardsFromDeck);
         }
 
-        Double totalCollectUsd=0.0;
-        for(Card card:allCollectedCard){
-            totalCollectUsd+=card.getPriceUsd();
-        }
 
         log.info("Now parsing the cards to buy and to proxy for deck : " + treatDeck.getName());
         List<Card> cardsFromTargetDeck = getDeckListFor(treatDeck);
 
-        int nProx=0;
-        int nBuy=0;
-        Double totalUsdProx=0.0;
-        Double totalUsdBuy=0.0;
+        int nProx = 0;
+        int nMaybe = 0;
+        int nBuy = 0;
+        Double totalUsdProx = 0.0;
+        Double totalUsdMaybe = 0.0;
+        Double totalUsdBuy = 0.0;
         try (PrintWriter outBuy = new PrintWriter(new OutputStreamWriter(
-                new FileOutputStream("OUT/buy.dat"), StandardCharsets.UTF_8))) {
+                new FileOutputStream("OUT/newToBuyCards.dat"), StandardCharsets.UTF_8))) {
 
             try (PrintWriter outProx = new PrintWriter(new OutputStreamWriter(
-                    new FileOutputStream("OUT/proxy.dat"), StandardCharsets.UTF_8))) {
-                for (Card card : cardsFromTargetDeck) {
+                    new FileOutputStream("OUT/alreadyHaveCards.dat"), StandardCharsets.UTF_8))) {
+                        outProx.println("Cardname;FoundInDeck;BoardType");
+                try (PrintWriter sidedCard = new PrintWriter(new OutputStreamWriter(
+                        new FileOutputStream("OUT/sidedCards.dat"), StandardCharsets.UTF_8))) {
+                            sidedCard.println("Cardname;FoundInDeck;BoardType");
+                    for (Card card : cardsFromTargetDeck) {
 
-                    if(allCollectedCard.contains(card)){
-                        outProx.println(card.getName());
-                        totalUsdProx+=card.getPriceUsd();
-                        nProx++;
-                    } else {
-                        outBuy.println(card.getName());
-                        totalUsdBuy+=card.getPriceUsd();
-                        nBuy++;
+                        Card matchingCardMain = findMatchingCard(card,allCollectedCard,"mainboard");
+                        Card matchingCardSide = findMatchingCard(card,allCollectedCard,"sideboard");
+                        if(matchingCardSide==null && allowConsiderBoard){
+                            matchingCardSide = findMatchingCard(card,allCollectedCard,"maybeboard");
+                        }
+                        if (matchingCardMain!=null || matchingCardSide!=null) {
+                            if(matchingCardMain!=null){
+                                outProx.println(matchingCardMain.getName()+";"+matchingCardMain.getDeckName()+";"+matchingCardMain.getTypeBoard());
+                                totalUsdProx += card.getPriceUsd();
+                                nProx++;
+                            } else {
+                                sidedCard.println(matchingCardSide.getName()+";"+matchingCardSide.getDeckName()+";"+matchingCardSide.getTypeBoard());
+                                totalUsdMaybe += card.getPriceUsd();
+                                nMaybe++;
+                            }  
+                        } else {
+                            outBuy.println(card.getName());
+                            totalUsdBuy += card.getPriceUsd();
+                            nBuy++;
+                        }
                     }
                 }
             }
         }
-
+        Double totalCollectUsd = 0.0;
+        Set<Card> singleCardByNameForPrice= new HashSet<>();
+        singleCardByNameForPrice.addAll(allCollectedCard);
+        for(Card card: singleCardByNameForPrice){
+            totalCollectUsd += card.getPriceUsd();
+        }
+    
         long endTotal = System.currentTimeMillis();
         log.info("MoxfieldProxyBuyComparer ended it took a total time of " + convertTime(endTotal - startTotal));
-        log.info("The total collection of "+user+ " has "+allCollectedCard.size()+" cards (estimated at "+String.format("%.2f", totalCollectUsd)+" usd)");
-        log.info("The deck "+ treatDeck.getName()+" contains "+nBuy+" new cards to buy (estimated at "+String.format("%.2f", totalUsdBuy)+" usd) and "+nProx+" to proxy (economy of "+String.format("%.2f", totalUsdProx)+" usd)).");
+        log.info("The total collection of " + user + " has " + allCollectedCard.size() + " cards (estimated at "
+                + String.format("%.2f", totalCollectUsd) + " usd)");
+        log.info("The deck " + treatDeck.getName() + " contains " + nBuy + " new cards to buy (estimated at "
+                + String.format("%.2f", totalUsdBuy) + " usd) and " + nMaybe + " to maybe if there in side or maybeboard  (economy of "
+                + String.format("%.2f", totalUsdMaybe) + " usd)) and " + nProx + " to proxy (economy of "
+                + String.format("%.2f", totalUsdProx) + " usd)).");
+    }
+
+    private static Card findMatchingCard(Card targetCard, List<Card> allCollectedCard, String typeboard) {
+       for(Card card: allCollectedCard){
+        if(card.equals(targetCard) && card.getTypeBoard().equalsIgnoreCase(typeboard)){
+            return card;
+        }
+       }
+       return null;
     }
 
     private static void setConenction(HttpURLConnection connection) {
@@ -176,38 +214,48 @@ public final class MoxfieldProxyBuyComparer {
                 ObjectMapper objectMapper = new ObjectMapper();
                 JsonNode rootNode = objectMapper.readTree(jsonResponse);
 
+                String deckName = rootNode.path("name").asText();
+
                 // Assuming "mainboard" is a direct child of the root node and contains the
                 // cards
-                JsonNode mainboardNode = rootNode.path("mainboard");
-
-                Iterator<Map.Entry<String, JsonNode>> fields = mainboardNode.fields();
+        
+                List<String> typeBoards = Arrays.asList("mainboard", "sideboard");
+                if(allowConsiderBoard){
+                    typeBoards.add("maybeboard");
+                }
                 List<Card> deckCards = new ArrayList<>();
-                while (fields.hasNext()) {
-                    Map.Entry<String, JsonNode> entry = fields.next();
-                    JsonNode cardNode = entry.getValue().path("card");
+                for (String typeBoard : typeBoards) {
+                    JsonNode board = rootNode.path(typeBoard);
 
-                    byte[] utf8Bytes = cardNode.path("name").asText().getBytes(StandardCharsets.UTF_8);
-                    String nameNorm = Normalizer.normalize(new String(utf8Bytes, StandardCharsets.UTF_8),
-                            Normalizer.Form.NFD);
-                    ;
-                    String name = nameNorm.replaceAll("\\p{M}", "");
+                    Iterator<Map.Entry<String, JsonNode>> fields = board.fields();
 
-                    String rarity = cardNode.path("rarity").asText();
-                    String mana_cost = cardNode.path("mana_cost").asText();
-                    int cmc = cardNode.path("cmc").asInt();
-                    String type_line = cardNode.path("type_line").asText();
+                    while (fields.hasNext()) {
+                        Map.Entry<String, JsonNode> entry = fields.next();
+                        JsonNode cardNode = entry.getValue().path("card");
 
-                    String oracle_text = cardNode.path("oracle_text").asText();
-                    List<String> color_identity = objectMapper.convertValue(cardNode.path("color_identity"),
-                            new TypeReference<List<String>>() {
-                            });
+                        byte[] utf8Bytes = cardNode.path("name").asText().getBytes(StandardCharsets.UTF_8);
+                        String nameNorm = Normalizer.normalize(new String(utf8Bytes, StandardCharsets.UTF_8),
+                                Normalizer.Form.NFD);
+                        ;
+                        String name = nameNorm.replaceAll("\\p{M}", "");
 
-                    String commanderLegality = cardNode.path("legalities").path("commander").asText();
+                        String rarity = cardNode.path("rarity").asText();
+                        String mana_cost = cardNode.path("mana_cost").asText();
+                        int cmc = cardNode.path("cmc").asInt();
+                        String type_line = cardNode.path("type_line").asText();
 
-                    Double price_usd = cardNode.path("prices").path("usd").asDouble();
-                    Card card = new Card(name, rarity, mana_cost, cmc, type_line, color_identity, commanderLegality,
-                            oracle_text, price_usd);
-                    deckCards.add(card);
+                        String oracle_text = cardNode.path("oracle_text").asText();
+                        List<String> color_identity = objectMapper.convertValue(cardNode.path("color_identity"),
+                                new TypeReference<List<String>>() {
+                                });
+
+                        String commanderLegality = cardNode.path("legalities").path("commander").asText();
+
+                        Double price_usd = cardNode.path("prices").path("usd").asDouble();
+                        Card card = new Card(name, rarity, mana_cost, cmc, type_line, color_identity, commanderLegality,
+                                oracle_text, price_usd, typeBoard, deckName);
+                        deckCards.add(card);
+                    }
                 }
                 return deckCards;
             } catch (Exception e1) {
