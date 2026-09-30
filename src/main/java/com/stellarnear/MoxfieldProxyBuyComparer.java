@@ -1,8 +1,8 @@
 package com.stellarnear;
 
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.FileOutputStream;
-import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
@@ -17,7 +17,11 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Scanner;
 import java.util.Set;
+import java.util.stream.Collectors;
+
+import org.jasypt.util.text.BasicTextEncryptor;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -30,110 +34,187 @@ public final class MoxfieldProxyBuyComparer {
 
     private static CustomLog log = new CustomLog(MoxfieldProxyBuyComparer.class);
 
+    private static String encryptedAgent = "+lmuo3n0nvJINPsXppfLh5wbQk1fkJJ3BY6+5cA/WhfxENvuJYGQTQ==";
+    private static String customPassword;
+    private static String decryptedAgent;
+
     private MoxfieldProxyBuyComparer() {
     }
 
-
     private static String user = "StellarNear";
-    private static String notBuyedDeck = "TBDzmy5Wj0K21AevzAd5Bw";
-    private static boolean allowConsiderBoard=false;
+
+    // yuriko kJcEKNJ3P0eZRVVQHdHzeg
+    // roxanne RD2kbSMKAUGgJxtM2cE9Pw
+    // zethi 9AYzD7WrYki4yDLgIGhBAA
+
+    private static List<String> notBuyedDecks = Arrays.asList("pO3UVMHJ4UWZiGrJmUhayA");
+
+    private static boolean allowConsiderBoard = true;
 
     /**
      * Says hello to the world.
      * 
      * @param args The arguments of the program.
-     * @throws IOException
+     * @throws Exception
      */
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) throws Exception {
         long startTotal = System.currentTimeMillis();
 
-  
+        Scanner scanner = new Scanner(System.in);
+
+        System.out.print("Enter the custom password to decrypt the agent moxfield : ");
+        customPassword = scanner.nextLine();
+
+        if (customPassword.isEmpty()) {
+            log.err("You must provide the custom password");
+        }
+
+        try {
+            BasicTextEncryptor textEncryptor = new BasicTextEncryptor();
+            textEncryptor.setPassword(customPassword);
+            decryptedAgent = textEncryptor.decrypt(encryptedAgent);
+
+        } catch (Exception e) {
+            log.err("Invalid custom password or encrypted value !");
+            throw new Exception("Invalid custom password or encrypted value !");
+        }
 
         List<UserDataDeck> allDecksForUser = getAllDeckForUser(user);
-
-        List<Card> allCollectedCard = new ArrayList<>();
-        UserDataDeck treatDeck = null;
         log.info("Found " + allDecksForUser.size() + " decks");
+        List<Card> allCollectedCard = new ArrayList<>();
+        List<UserDataDeck> treatDecks = new ArrayList<>();
+
         for (UserDataDeck deck : allDecksForUser) {
-            if (deck.getPublicId().equalsIgnoreCase(notBuyedDeck)) {
-                treatDeck = deck;
+            if (notBuyedDecks.contains(deck.getPublicId())) {
+                treatDecks.add(deck);
                 continue;
             }
             log.info("Treating deck " + deck.getName());
-            List<Card> cardsFromDeck = getDeckListFor(deck);
-            log.info("Found " + cardsFromDeck.size() + " cards");
-            allCollectedCard.addAll(cardsFromDeck);
+            getDeckListFor(deck);
+            log.info("Found " + deck.getCardList().size() + " cards");
+            allCollectedCard.addAll(deck.getCardList());
         }
 
+        if (treatDecks.size() == 0) {
+            log.info(
+                    "No deck to treat, exiting were found among the total list (maybe the deck is not legal yet or not public) we will fetch him apart");
+            for (String deckId : notBuyedDecks) {
+                UserDataDeck deck = new UserDataDeck();
+                deck.setPublicId(deckId);
 
-        log.info("Now parsing the cards to buy and to proxy for deck : " + treatDeck.getName());
-        List<Card> cardsFromTargetDeck = getDeckListFor(treatDeck);
+                getDeckListFor(deck);
 
-        int nProx = 0;
-        int nMaybe = 0;
-        int nBuy = 0;
-        Double totalUsdProx = 0.0;
-        Double totalUsdMaybe = 0.0;
-        Double totalUsdBuy = 0.0;
-        try (PrintWriter outBuy = new PrintWriter(new OutputStreamWriter(
-                new FileOutputStream("OUT/newToBuyCards.dat"), StandardCharsets.UTF_8))) {
+                log.info("Found " + deck.getCardList().size() + " cards for deck : " + deck.getName());
 
-            try (PrintWriter outProx = new PrintWriter(new OutputStreamWriter(
-                    new FileOutputStream("OUT/alreadyHaveCards.dat"), StandardCharsets.UTF_8))) {
-                        outProx.println("Cardname;FoundInDeck;BoardType");
-                try (PrintWriter sidedCard = new PrintWriter(new OutputStreamWriter(
-                        new FileOutputStream("OUT/sidedCards.dat"), StandardCharsets.UTF_8))) {
-                            sidedCard.println("Cardname;FoundInDeck;BoardType");
-                    for (Card card : cardsFromTargetDeck) {
+                deck.setPublicId(deckId);
+                treatDecks.add(deck);
+                log.info("Adding deck " + deck.getName() + " to the list of decks to treat");
+            }
 
-                        Card matchingCardMain = findMatchingCard(card,allCollectedCard,"mainboard");
-                        Card matchingCardSide = findMatchingCard(card,allCollectedCard,"sideboard");
-                        if(matchingCardSide==null && allowConsiderBoard){
-                            matchingCardSide = findMatchingCard(card,allCollectedCard,"maybeboard");
-                        }
-                        if (matchingCardMain!=null || matchingCardSide!=null) {
-                            if(matchingCardMain!=null){
-                                outProx.println(matchingCardMain.getName()+";"+matchingCardMain.getDeckName()+";"+matchingCardMain.getTypeBoard());
-                                totalUsdProx += card.getPriceUsd();
-                                nProx++;
+        }
+
+        for (UserDataDeck treatDeck : treatDecks) {
+
+            log.info("Now parsing the cards to buy and to proxy for deck : " + treatDeck.getName());
+
+            int nProx = 0;
+            int nMaybe = 0;
+            int nBuy = 0;
+            Double totalUsdProx = 0.0;
+            Double totalUsdMaybe = 0.0;
+            Double totalUsdBuy = 0.0;
+            File currentFolder = new File("OUT/" + treatDeck.getName());
+            if (!currentFolder.exists()) {
+                currentFolder.mkdirs();
+                log.info("Creating folder for deck : " + currentFolder.getPath());
+            } else {
+                log.info("Folder already exists for deck : " + currentFolder.getPath());
+            }
+            try (PrintWriter outBuy = new PrintWriter(new OutputStreamWriter(
+                    new FileOutputStream(currentFolder.getAbsolutePath() + "/newToBuyCards.csv"),
+                    StandardCharsets.UTF_8))) {
+
+                try (PrintWriter outProx = new PrintWriter(new OutputStreamWriter(
+                        new FileOutputStream(currentFolder.getAbsolutePath() + "/alreadyHaveCards.csv"),
+                        StandardCharsets.UTF_8))) {
+                    outProx.println("Cardname;FoundInDeck;BoardType");
+                    try (PrintWriter sidedCard = new PrintWriter(new OutputStreamWriter(
+                            new FileOutputStream(currentFolder.getAbsolutePath() + "/sidedCards.csv"),
+                            StandardCharsets.UTF_8))) {
+                        sidedCard.println("Cardname;FoundInDeck;BoardType");
+                        for (Card card : treatDeck.getCardList()) {
+                            if (!card.getTypeBoard().equals("mainboard")) { // we will only buy/proxy mainboard
+                                continue;
+                            }
+
+                            List<Card> matchingCardMain = findMatchingCard(card, allCollectedCard, "mainboard");
+                            List<Card> matchingCardsSide = findMatchingCard(card, allCollectedCard, "sideboard");
+                            if (matchingCardsSide.size() == 0 && allowConsiderBoard) {
+                                matchingCardsSide = findMatchingCard(card, allCollectedCard, "maybeboard");
+                            }
+                            if (matchingCardMain.size() > 0 || matchingCardsSide.size() > 0) {
+                                if (matchingCardMain.size() > 0) {
+                                    outProx.println(
+                                            getInfoLine(matchingCardMain));
+                                    totalUsdProx += card.getPriceUsd();
+                                    nProx++;
+                                } else {
+                                    sidedCard.println(getInfoLine(matchingCardsSide));
+                                    totalUsdMaybe += card.getPriceUsd();
+                                    nMaybe++;
+                                }
                             } else {
-                                sidedCard.println(matchingCardSide.getName()+";"+matchingCardSide.getDeckName()+";"+matchingCardSide.getTypeBoard());
-                                totalUsdMaybe += card.getPriceUsd();
-                                nMaybe++;
-                            }  
-                        } else {
-                            outBuy.println(card.getName());
-                            totalUsdBuy += card.getPriceUsd();
-                            nBuy++;
+                                outBuy.println(card.getName());
+                                totalUsdBuy += card.getPriceUsd();
+                                nBuy++;
+                            }
                         }
                     }
                 }
             }
+            log.info("The deck " + treatDeck.getName() + " contains " + nBuy + " new cards to buy (estimated at "
+                    + String.format("%.2f", totalUsdBuy) + " usd) and " + nMaybe
+                    + " to maybe proxy (after check in in side or maybeboard)  (economy of "
+                    + String.format("%.2f", totalUsdMaybe) + " usd)) and " + nProx + " to proxy (economy of "
+                    + String.format("%.2f", totalUsdProx) + " usd)).");
+
         }
+        Double totalCollectUsdSideOnly = 0.0;
         Double totalCollectUsd = 0.0;
-        Set<Card> singleCardByNameForPrice= new HashSet<>();
+        Set<Card> singleCardByNameForPrice = new HashSet<>();
         singleCardByNameForPrice.addAll(allCollectedCard);
-        for(Card card: singleCardByNameForPrice){
+        for (Card card : singleCardByNameForPrice) {
+            if (card.getTypeBoard().equalsIgnoreCase("sideboard")
+                    || card.getTypeBoard().equalsIgnoreCase("mainboard")) {
+                totalCollectUsdSideOnly += card.getPriceUsd();
+            }
             totalCollectUsd += card.getPriceUsd();
         }
-    
+
         long endTotal = System.currentTimeMillis();
         log.info("MoxfieldProxyBuyComparer ended it took a total time of " + convertTime(endTotal - startTotal));
         log.info("The total collection of " + user + " has " + allCollectedCard.size() + " cards (estimated at "
-                + String.format("%.2f", totalCollectUsd) + " usd)");
-        log.info("The deck " + treatDeck.getName() + " contains " + nBuy + " new cards to buy (estimated at "
-                + String.format("%.2f", totalUsdBuy) + " usd) and " + nMaybe + " to maybe if there in side or maybeboard  (economy of "
-                + String.format("%.2f", totalUsdMaybe) + " usd)) and " + nProx + " to proxy (economy of "
-                + String.format("%.2f", totalUsdProx) + " usd)).");
+                + String.format("%.2f", totalCollectUsdSideOnly) + " usd) and " + String.format("%.2f", totalCollectUsd)
+                + " if we consider also maybeboard.");
     }
 
-    private static Card findMatchingCard(Card targetCard, List<Card> allCollectedCard, String typeboard) {
-       for(Card card: allCollectedCard){
-        if(card.equals(targetCard) && card.getTypeBoard().equalsIgnoreCase(typeboard)){
-            return card;
+    private static String getInfoLine(List<Card> listCards) {
+        return listCards.get(0).getName() + ";" + listCards.stream()
+                .map(Card::getDeckName)
+                .collect(Collectors.joining(" | ")) + ";"
+                + listCards.stream()
+                        .map(Card::getTypeBoard)
+                        .collect(Collectors.joining(" | "));
+    }
+
+    private static List<Card> findMatchingCard(Card targetCard, List<Card> allCollectedCard, String typeboard) {
+        ArrayList<Card> list = new ArrayList<>();
+        for (Card card : allCollectedCard) {
+            if (card.equals(targetCard) && card.getTypeBoard().equalsIgnoreCase(typeboard)) {
+                list.add(card);
+            }
         }
-       }
-       return null;
+        return list;
     }
 
     private static void setConenction(HttpURLConnection connection) {
@@ -142,19 +223,42 @@ public final class MoxfieldProxyBuyComparer {
         // connection.setRequestProperty("Accept-Encoding", "gzip, deflate, br, zstd");
         // connection.setRequestProperty("Accept-Language",
         // "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7");
-        connection.setRequestProperty("User-Agent",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
 
-        // HERE go to the url and get the refresh from the header with dev mod on chrome
-        connection.setRequestProperty("Cookie", "refresh_token=13c67b3b-3cf8-465a-aacd-3bb73f8c04f1");
+        connection.setRequestProperty("user-agent", decryptedAgent);
     }
 
-    private static List<UserDataDeck> getAllDeckForUser(String user) throws MalformedURLException {
+    private static List<UserDataDeck> getAllDeckForUser(String user)
+            throws MalformedURLException, InterruptedException {
 
-        // ex https://api2.moxfield.com/v2/users/Nonoein/decks
-        String userUrl = "https://api2.moxfield.com/v2/users/" + user + "/decks";
+        List<UserDataDeck> allDecks = new ArrayList<>();
+
+        // oold String userUrl = "https://api2.moxfield.com/v2/users/" + user +
+        // "/decks";
+        // new url ? https://api2.moxfield.com/v2/decks/search?authorUserNames=
+
+        String userUrl = "https://api2.moxfield.com/v2/decks/search?authorUserNames=" + user + "&pageSize=100";
+        // currently there are problem some decks are missing here (missing deck (3 in
+        // my case))
+
+        int totalNPages = addDecksToList(user, userUrl, allDecks);
+
+        if (totalNPages > 1) {
+            for (int nPage = 2; nPage <= totalNPages; nPage++) {
+                // old userUrl = "https://api2.moxfield.com/v2/users/" + user + "/decks" +
+                // "?pageNumber=" + nPage;
+                userUrl = "https://api2.moxfield.com/v2/decks/search?authorUserNames=" + user
+                        + "&pageSize=100&pageNumber=" + nPage;
+                // currently there are problem some decks are missing here
+                addDecksToList(user, userUrl, allDecks);
+            }
+        }
+        return allDecks;
+    }
+
+    private static int addDecksToList(String userName, String userUrl, List<UserDataDeck> allDecks)
+            throws MalformedURLException, InterruptedException {
         URL url = new URL(userUrl);
-        HttpURLConnection connection;
+        HttpURLConnection connection = null;
         try {
             connection = (HttpURLConnection) url.openConnection();
             setConenction(connection);
@@ -175,6 +279,14 @@ public final class MoxfieldProxyBuyComparer {
 
                 if (dataNode.isArray()) {
                     for (JsonNode node : dataNode) {
+                        JsonNode createdByUser = node.path("createdByUser");
+                        String creator = createdByUser.path("userName").asText();
+
+                        // skip decks not created by the target user
+                        if (!userName.equalsIgnoreCase(creator)) {
+                            log.info("Skipping deck " + node.path("name").asText() + " created by " + creator);
+                            continue;
+                        }
                         UserDataDeck child = new UserDataDeck();
                         child.setOwner(user);
                         child.setPublicId(node.path("publicId").asText());
@@ -182,21 +294,29 @@ public final class MoxfieldProxyBuyComparer {
                         allUserData.add(child);
                     }
                 }
-                return allUserData;
+
+                int totalPages = rootNode.path("totalPages").asInt();
+                allDecks.addAll(allUserData);
+                return totalPages;
             } catch (Exception e1) {
                 log.err("Error reading the user data", e1);
             }
         } catch (Exception e) {
             log.err("Error getting the connection to user data", e);
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+            Thread.sleep(1000);
         }
-        return new ArrayList<>();
+        return 0;
     }
 
-    private static List<Card> getDeckListFor(UserDataDeck deck) throws MalformedURLException {
+    private static void getDeckListFor(UserDataDeck deck) throws MalformedURLException, InterruptedException {
         // ex https://api.moxfield.com/v2/decks/all/HxV33izihky7KTwjU0ER9w
         String deckUrl = "https://api.moxfield.com/v2/decks/all/" + deck.getPublicId();
         URL url = new URL(deckUrl);
-        HttpURLConnection connection;
+        HttpURLConnection connection = null;
 
         try {
             connection = (HttpURLConnection) url.openConnection();
@@ -215,12 +335,15 @@ public final class MoxfieldProxyBuyComparer {
                 JsonNode rootNode = objectMapper.readTree(jsonResponse);
 
                 String deckName = rootNode.path("name").asText();
+                if (deck.getName() == null || deck.getName().isEmpty()) {
+                    deck.setName(deckName);
+                }
 
                 // Assuming "mainboard" is a direct child of the root node and contains the
                 // cards
-        
-                List<String> typeBoards = Arrays.asList("mainboard", "sideboard");
-                if(allowConsiderBoard){
+
+                List<String> typeBoards = new ArrayList<>(Arrays.asList("mainboard", "sideboard"));
+                if (allowConsiderBoard) {
                     typeBoards.add("maybeboard");
                 }
                 List<Card> deckCards = new ArrayList<>();
@@ -257,7 +380,7 @@ public final class MoxfieldProxyBuyComparer {
                         deckCards.add(card);
                     }
                 }
-                return deckCards;
+                deck.setCardList(deckCards);
             } catch (Exception e1) {
                 e1.printStackTrace();
                 log.err("Error reading the user data", e1);
@@ -265,8 +388,12 @@ public final class MoxfieldProxyBuyComparer {
             }
         } catch (Exception e) {
             log.err("Error getting the connection to user data", e);
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+            Thread.sleep(1000);
         }
-        return new ArrayList<>();
     }
 
     private static String convertTime(long l) {

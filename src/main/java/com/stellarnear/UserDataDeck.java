@@ -41,4 +41,8 @@ public class UserDataDeck {
     public String getOwner() {
         return owner;
     }
+
+    public void setCardList(List<Card> cardsFromDeck) {
+        this.cardList=cardsFromDeck;
+    }
 }
