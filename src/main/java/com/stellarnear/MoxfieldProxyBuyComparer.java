@@ -237,8 +237,7 @@ public final class MoxfieldProxyBuyComparer {
         // new url ? https://api2.moxfield.com/v2/decks/search?authorUserNames=
 
         String userUrl = "https://api2.moxfield.com/v2/decks/search?authorUserNames=" + user + "&pageSize=100";
-        // currently there are problem some decks are missing here (missing deck (3 in
-        // my case))
+        // note that this route only fetch legal deck (100 card mainboard)
 
         int totalNPages = addDecksToList(user, userUrl, allDecks);
 
@@ -248,7 +247,7 @@ public final class MoxfieldProxyBuyComparer {
                 // "?pageNumber=" + nPage;
                 userUrl = "https://api2.moxfield.com/v2/decks/search?authorUserNames=" + user
                         + "&pageSize=100&pageNumber=" + nPage;
-                // currently there are problem some decks are missing here
+            
                 addDecksToList(user, userUrl, allDecks);
             }
         }
